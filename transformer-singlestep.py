@@ -3,7 +3,9 @@ import torch.nn as nn
 import numpy as np
 import time
 import math
-from matplotlib import pyplot
+import pandas as pd
+from matplotlib import pyplot, pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -78,26 +80,39 @@ class TransAm(nn.Module):
 # in -> [0..99]
 # target -> [1..100]
 def create_inout_sequences(input_data, tw):
+    '''
+    Creates input sequence
+    :param input_data: train or validation data
+    :param tw: input window
+    :return:
+    '''
     inout_seq = []
     L = len(input_data)
-    for i in range(L-tw):
-        train_seq = input_data[i:i+tw]
-        train_label = input_data[i+output_window:i+tw+output_window]
-        inout_seq.append((train_seq ,train_label))
+    for i in range(L - tw):
+        train_seq = input_data[i:i + tw]
+        train_label = input_data[i + output_window:i + tw + output_window]
+        inout_seq.append((train_seq, train_label))
     return torch.FloatTensor(inout_seq)
 
-def get_data():
-    # construct a littel toy dataset
-    time        = np.arange(0, 400, 0.1)    
-    amplitude   = np.sin(time) + np.sin(time*0.05) +np.sin(time*0.12) *np.random.normal(-0.2, 0.2, len(time))
 
-    
-    from sklearn.preprocessing import MinMaxScaler
-    
-    #loading weather data from a file
-    #from pandas import read_csv
-    #series = read_csv('daily-min-temperatures.csv', header=0, index_col=0, parse_dates=True, squeeze=True)
-    
+def split_data(x, y):
+    percentage = int(0.85 * len(y))
+    train_data_x = x[0:percentage]
+    test_data_x = x[percentage:]
+    train_data_y = y[0:percentage]
+    test_data_y = y[percentage:]
+    return train_data_x, train_data_y, test_data_x, test_data_y
+
+
+def get_data():
+    # construct a little toy dataset
+    time = np.arange(0, 400, 0.1)
+    amplitude = np.sin(time) + np.sin(time * 0.05) + np.sin(time * 0.12) * np.random.normal(-0.2, 0.2, len(time))
+
+    # loading weather data from a file
+    # from pandas import read_csv
+    # series = read_csv('daily-min-temperatures.csv', header=0, index_col=0, parse_dates=True, squeeze=True)
+
     # looks like normalizing input values curtial for the model
     scaler = MinMaxScaler(feature_range=(-1, 1)) 
     #amplitude = scaler.fit_transform(series.to_numpy().reshape(-1, 1)).reshape(-1)
@@ -107,6 +122,22 @@ def get_data():
     sampels = 2600
     train_data = amplitude[:sampels]
     test_data = amplitude[sampels:]
+
+    # My Code
+    df = pd.read_csv('data/GlobalTemperatures.csv', parse_dates=[0])
+    train_data_x, train_data_y, test_data_x, test_data_y = split_data(df['dt'], df['LandAverageTemperature'])
+
+    train_data = train_data_y.to_numpy()
+    test_data = test_data_y.to_numpy()
+
+    train_data = scaler.fit_transform(train_data.reshape(-1, 1)).reshape(-1)
+    test_data = scaler.fit_transform(test_data.reshape(-1, 1)).reshape(-1)
+
+    plt.figure(facecolor='white', figsize=(17, 8))
+    plt.plot(train_data_x, train_data_y)
+    plt.plot(test_data_x, test_data_y)
+    plt.savefig('./graph/train_test_data')
+    plt.close()
 
     # convert our train data into a pytorch train tensor
     #train_tensor = torch.FloatTensor(train_data).view(-1)
