@@ -89,8 +89,11 @@ def create_inout_sequences(input_data, tw):
     inout_seq = []
     L = len(input_data)
     for i in range(L - tw):
+        # input data is packed in input window sized "packages"
         train_seq = input_data[i:i + tw]
+        # input data with time shift depending on output window
         train_label = input_data[i + output_window:i + tw + output_window]
+        # train data and labels are packed together into tuples
         inout_seq.append((train_seq, train_label))
     return torch.FloatTensor(inout_seq)
 
@@ -103,8 +106,7 @@ def split_data(x, y):
     test_data_y = y[percentage:]
     return train_data_x, train_data_y, test_data_x, test_data_y
 
-
-def get_data():
+def get_data_old():
     # construct a little toy dataset
     time = np.arange(0, 400, 0.1)
     amplitude = np.sin(time) + np.sin(time * 0.05) + np.sin(time * 0.12) * np.random.normal(-0.2, 0.2, len(time))
@@ -122,21 +124,49 @@ def get_data():
     train_data = amplitude[:sampels]
     test_data = amplitude[sampels:]
 
+    # convert our train data into a pytorch train tensor
+    # train_tensor = torch.FloatTensor(train_data).view(-1)
+    # todo: add comment..
+    train_sequence = create_inout_sequences(train_data, input_window)
+    train_sequence = train_sequence[
+                     :-output_window]  # todo: fix hack? -> din't think this through, looks like the last n sequences are to short, so I just remove them. Hackety Hack..
+
+    # test_data = torch.FloatTensor(test_data).view(-1)
+    test_data = create_inout_sequences(test_data, input_window)
+    test_data = test_data[:-output_window]  # todo: fix hack?
+
+    return train_sequence.to(device), test_data.to(device)
+
+def get_data():
+
+    # looks like normalizing input values curtial for the model
+    scaler = MinMaxScaler(feature_range=(-1, 1))
+
     # My Code
     df = pd.read_csv('data/GlobalTemperatures.csv', parse_dates=[0])
     train_data_x, train_data_y, test_data_x, test_data_y = split_data(df['dt'], df['LandAverageTemperature'])
-
-    train_data = train_data_y.to_numpy()
-    test_data = test_data_y.to_numpy()
-
-    train_data = scaler.fit_transform(train_data.reshape(-1, 1)).reshape(-1)
-    test_data = scaler.fit_transform(test_data.reshape(-1, 1)).reshape(-1)
 
     plt.figure(facecolor='white', figsize=(17, 8))
     plt.plot(train_data_x, train_data_y)
     plt.plot(test_data_x, test_data_y)
     plt.savefig('./graph/train_test_data')
     plt.close()
+
+    print("NaN values in train_data: " + str(train_data_y.isna().sum()))
+    print("NaN values in test_data: " + str(test_data_y.isna().sum()))
+
+    # todo: WARNING! x and y don't match after removing NaN this way
+    train_data_y = train_data_y.dropna()
+    test_data_y = test_data_y.dropna()
+
+    print("NaN values in train_data: " + str(train_data_y.isna().sum()))
+    print("NaN values in test_data: " + str(test_data_y.isna().sum()))
+
+    train_data = train_data_y.to_numpy()
+    test_data = test_data_y.to_numpy()
+
+    train_data = scaler.fit_transform(train_data.reshape(-1, 1)).reshape(-1)
+    test_data = scaler.fit_transform(test_data.reshape(-1, 1)).reshape(-1)
 
     # convert our train data into a pytorch train tensor
     # train_tensor = torch.FloatTensor(train_data).view(-1)
@@ -153,6 +183,13 @@ def get_data():
 
 
 def get_batch(source, i, batch_size):
+    '''
+
+    :param source:
+    :param i:
+    :param batch_size:
+    :return:
+    '''
     seq_len = min(batch_size, len(source) - 1 - i)
     data = source[i:i + seq_len]
     input = torch.stack(torch.stack([item[0] for item in data]).chunk(input_window, 1))  # 1 is feature size
@@ -170,6 +207,7 @@ def train(train_data):
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, targets)
+        # explanation https://stackoverflow.com/questions/53975717/pytorch-connection-between-loss-backward-and-optimizer-step
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.7)
         optimizer.step()
@@ -252,6 +290,7 @@ def evaluate(eval_model, data_source):
 
 
 train_data, val_data = get_data()
+#train_data, val_data = get_data_old()
 model = TransAm().to(device)
 
 criterion = nn.MSELoss()
@@ -261,7 +300,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
 
 best_val_loss = float("inf")
-epochs = 10  # The number of epochs
+epochs = 25  # The number of epochs
 best_model = None
 
 for epoch in range(1, epochs + 1):
