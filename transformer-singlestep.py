@@ -106,6 +106,7 @@ def split_data(x, y):
     test_data_y = y[percentage:]
     return train_data_x, train_data_y, test_data_x, test_data_y
 
+
 def get_data_old():
     # construct a little toy dataset
     time = np.arange(0, 400, 0.1)
@@ -137,13 +138,15 @@ def get_data_old():
 
     return train_sequence.to(device), test_data.to(device)
 
-def get_data():
 
+def get_data():
     # looks like normalizing input values curtial for the model
     scaler = MinMaxScaler(feature_range=(-1, 1))
 
     # My Code
     df = pd.read_csv('data/GlobalTemperatures.csv', parse_dates=[0])
+    df = df.dropna(subset=['dt', 'LandAverageTemperature'])
+    df = df.iloc[1789:len(df)-23, 0:2]  # start 1900-01-01 end 2014-01-01, reserving one year for test
     train_data_x, train_data_y, test_data_x, test_data_y = split_data(df['dt'], df['LandAverageTemperature'])
 
     plt.figure(facecolor='white', figsize=(17, 8))
@@ -155,12 +158,9 @@ def get_data():
     print("NaN values in train_data: " + str(train_data_y.isna().sum()))
     print("NaN values in test_data: " + str(test_data_y.isna().sum()))
 
-    # todo: WARNING! x and y don't match after removing NaN this way
-    train_data_y = train_data_y.dropna()
-    test_data_y = test_data_y.dropna()
-
-    print("NaN values in train_data: " + str(train_data_y.isna().sum()))
-    print("NaN values in test_data: " + str(test_data_y.isna().sum()))
+    # todo: WARNING! x and y don't match after removing NaN this way - fix in line 148
+    # train_data_y = train_data_y.dropna()
+    # test_data_y = test_data_y.dropna()
 
     train_data = train_data_y.to_numpy()
     test_data = test_data_y.to_numpy()
@@ -243,10 +243,12 @@ def plot_and_loss(eval_model, data_source, epoch):
     # test_result = test_result.cpu().numpy() -> no need to detach stuff..
     len(test_result)
 
-    pyplot.plot(test_result, color="red")
-    pyplot.plot(truth[:500], color="blue")
-    pyplot.plot(test_result - truth, color="green")
+    pyplot.figure(facecolor='white', figsize=(17, 8))
+    pyplot.plot(test_result, color="red", label="test_result")
+    pyplot.plot(truth[:500], color="blue", label="truth")
+    pyplot.plot(test_result - truth, color="green", label="test_result - truth")
     pyplot.grid(True, which='both')
+    pyplot.legend()
     pyplot.axhline(y=0, color='k')
     pyplot.savefig('graph/transformer-epoch%d.png' % epoch)
     pyplot.close()
@@ -268,19 +270,27 @@ def predict_future(eval_model, data_source, steps):
 
     data = data.cpu().view(-1)
 
-    # I used this plot to visualize if the model pics up any long therm struccture within the data. 
+    # I used this plot to visualize if the model pics up any long therm struccture within the data.
+    pyplot.figure(facecolor='white', figsize=(17, 8))
     pyplot.plot(data, color="red")
     pyplot.plot(data[:input_window], color="blue")
     pyplot.grid(True, which='both')
     pyplot.axhline(y=0, color='k')
     pyplot.savefig('graph/transformer-future%d.png' % steps)
     pyplot.close()
+    return data
 
 
 def evaluate(eval_model, data_source):
+    '''
+
+    :param eval_model:
+    :param data_source: validation data
+    :return:
+    '''
     eval_model.eval()  # Turn on the evaluation mode
     total_loss = 0.
-    eval_batch_size = 100
+    eval_batch_size = 300
     with torch.no_grad():
         for i in range(0, len(data_source) - 1, eval_batch_size):
             data, targets = get_batch(data_source, i, eval_batch_size)
@@ -289,8 +299,27 @@ def evaluate(eval_model, data_source):
     return total_loss / len(data_source)
 
 
+def one_year_prediction(model, val_data):
+    '''
+    generate prediction for one year and safe plot
+    :param model:
+    :param val_data:
+    :return:
+    '''
+    df = pd.read_csv("./data/GlobalTemperatures.csv")
+    df = df.iloc[len(df) - 23:len(df) - 11, 0:2]
+    data = predict_future(model, val_data, 1)
+    print(data)
+    pyplot.figure(facecolor='white', figsize=(17, 8))
+    pyplot.plot(data, color="red")
+    pyplot.plot(data[:input_window], color="blue")
+    pyplot.grid(True, which='both')
+    pyplot.axhline(y=0, color='k')
+    pyplot.savefig('graph/one_year_prediction.png')
+    pyplot.close()
+
 train_data, val_data = get_data()
-#train_data, val_data = get_data_old()
+# train_data, val_data = get_data_old()
 model = TransAm().to(device)
 
 criterion = nn.MSELoss()
@@ -300,7 +329,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
 
 best_val_loss = float("inf")
-epochs = 25  # The number of epochs
+epochs = 40  # The number of epochs
 best_model = None
 
 for epoch in range(1, epochs + 1):
@@ -325,6 +354,9 @@ for epoch in range(1, epochs + 1):
     #    best_model = model
 
     scheduler.step()
+
+one_year_prediction(model, val_data)
+
 
 # src = torch.rand(input_window, batch_size, 1) # (source sequence length,batch size,feature number)
 # out = model(src)
