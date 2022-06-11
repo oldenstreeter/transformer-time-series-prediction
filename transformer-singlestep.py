@@ -6,6 +6,7 @@ import math
 import pandas as pd
 from matplotlib import pyplot, pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from math import sqrt
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -23,10 +24,11 @@ input_window = 100  # number of input steps
 output_window = 1  # number of prediction steps, in this model its fixed to one
 batch_size = 10
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# looks like normalizing input values curtial for the model
+scaler = MinMaxScaler(feature_range=(-1, 1))
 
 
 class PositionalEncoding(nn.Module):
-
     def __init__(self, d_model, max_len=5000):
         super(PositionalEncoding, self).__init__()
         pe = torch.zeros(max_len, d_model)
@@ -140,18 +142,22 @@ def get_data_old():
 
 
 def get_data():
-    # looks like normalizing input values curtial for the model
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-
-    # My Code
     df = pd.read_csv('data/GlobalTemperatures.csv', parse_dates=[0])
     df = df.dropna(subset=['dt', 'LandAverageTemperature'])
     df = df.iloc[1789:len(df)-23, 0:2]  # start 1900-01-01 end 2014-01-01, reserving one year for test
     train_data_x, train_data_y, test_data_x, test_data_y = split_data(df['dt'], df['LandAverageTemperature'])
 
     plt.figure(facecolor='white', figsize=(17, 8))
-    plt.plot(train_data_x, train_data_y)
-    plt.plot(test_data_x, test_data_y)
+    plt.rc('axes', titlesize=20)
+    plt.rc('axes', labelsize=16)
+    plt.rc('xtick', labelsize=12)
+    plt.rc('ytick', labelsize=12)
+    plt.plot(train_data_x, train_data_y, label='Training')
+    plt.plot(test_data_x, test_data_y, label='Test')
+    plt.title('Train & Test Data Overview')
+    plt.xlabel('Date')
+    plt.ylabel('Avg. C°')
+    plt.legend(prop={'size': 16})
     plt.savefig('./graph/train_test_data')
     plt.close()
 
@@ -306,17 +312,44 @@ def one_year_prediction(model, val_data):
     :param val_data:
     :return:
     '''
+    # todo: wie in evaluate predicten nur ohne schleife und mit dem jahr 2014, auch ohne batch
+    '''
+    generate prediction for one year and safe plot
+    :param model:
+    :param val_data:
+    :return:
+    '''
     df = pd.read_csv("./data/GlobalTemperatures.csv")
     df = df.iloc[len(df) - 23:len(df) - 11, 0:2]
-    data = predict_future(model, val_data, 1)
-    print(data)
-    pyplot.figure(facecolor='white', figsize=(17, 8))
-    pyplot.plot(data, color="red")
-    pyplot.plot(data[:input_window], color="blue")
-    pyplot.grid(True, which='both')
-    pyplot.axhline(y=0, color='k')
-    pyplot.savefig('graph/one_year_prediction.png')
-    pyplot.close()
+    data = predict_future(model, val_data, 12)
+    data = scaler.inverse_transform(data.reshape(-1, 1))
+
+    # range of timestamps
+    timestamp_range = pd.date_range(start="2014-01-01", end="2015-01-01", freq='M')
+
+    plt.figure(facecolor='white', figsize=(17, 8))
+    plt.rc('axes', titlesize=20)
+    plt.rc('axes', labelsize=16)
+    plt.rc('xtick', labelsize=12)
+    plt.rc('ytick', labelsize=12)
+    # test[['Temp', 'Pred']].plot(figsize=(22,6))
+    plt.plot(timestamp_range, df['LandAverageTemperature'].to_numpy(), label='Real Temp.')
+    plt.plot(timestamp_range, data[len(data) - 14:len(data) - 2], label='Predicted Temp.')
+    plt.title('Transformer Forecast')
+    plt.xlabel('Date')
+    plt.ylabel('Avg. C°')
+    plt.legend(prop={'size': 16})
+    plt.savefig('./graph/Transformer-Forecast-' + str(epochs))
+    plt.close()
+
+    bias = data[len(data) - 14:len(data) - 2].mean() - df['LandAverageTemperature'].to_numpy().mean()
+    rmse = measure_rmse(df['LandAverageTemperature'].to_numpy(), data[len(data) - 14:len(data) - 2])
+    return bias, rmse
+
+
+def measure_rmse(y_true, y_pred):
+    # mit der Wurzel (sqrt) wird aus dem MSE der RMSE https://www.statology.org/mse-vs-rmse/
+    return sqrt(mean_squared_error(y_true, y_pred))
 
 train_data, val_data = get_data()
 # train_data, val_data = get_data_old()
